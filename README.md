@@ -6,11 +6,14 @@ environment to an open-source Vision-Language-Action (VLA) policy without making
 the physics loop wait for model inference.
 
 > [!IMPORTANT]
-> This repository is currently a **design scaffold**. The architecture, setup,
-> interfaces, and acceptance criteria are documented below, but the source files
-> and runnable entry points have not been implemented yet. Commands that reference
-> `pyproject.toml`, `scripts/`, or `tests/` describe the intended workflow once
-> those files land.
+> The MuJoCo path (Option A) is implemented and runnable end to end with the
+> dummy policy: `pyproject.toml`, `proto/schema.proto`, `sim/`, `policy_server/`,
+> and `scripts/run_sim.py` / `scripts/run_policy.py` all exist. The MuJoCo
+> environment uses a placeholder 4-DOF arm (`sim/assets/placeholder_arm.xml`),
+> not a real Panda -- see that file's docstring. Isaac Lab support
+> (`sim/isaac_env.py`), the native C++ ZeroMQ client (`src/ipc/`), the Docker
+> image, CI, and real policy backends (LeRobot/OpenPI) are still scaffold only;
+> commands referencing those describe the intended workflow once they land.
 
 ## Goals
 
@@ -214,7 +217,7 @@ consistent with NVIDIA's container instructions.
 
 ## Project environment
 
-Once `pyproject.toml` has been implemented, clone and install the core project:
+Clone and install the core project:
 
 ```bash
 git clone https://github.com/hgc2024/embodied_vla_sim_loop.git
@@ -366,8 +369,7 @@ authenticated or encrypted by ZeroMQ by default.
 
 ## Run the loop
 
-After the entry points are implemented, use two terminals in the same activated
-environment.
+Use two terminals in the same activated environment.
 
 Terminal 1 — start the policy server first:
 
@@ -463,15 +465,15 @@ smaller checkpoint, or a higher-end GPU.
 
 ## Implementation milestones
 
-- [ ] Add `pyproject.toml` with core, simulator, policy, and development extras.
-- [ ] Add and compile `proto/schema.proto` for Python and C++.
-- [ ] Implement the Gymnasium MuJoCo smoke-test environment.
-- [ ] Implement the Isaac Lab Panda environment and domain randomization.
-- [ ] Implement bounded, non-blocking ZeroMQ transport and stale-frame handling.
-- [ ] Implement the thread-safe latest-observation ring buffer.
-- [ ] Implement dummy, LeRobot, and OpenPI policy adapters.
-- [ ] Implement action-chunk interpolation and safe fallback behavior.
-- [ ] Add unit, integration, latency, and soak tests.
+- [x] Add `pyproject.toml` with core, simulator, policy, and development extras.
+- [x] Add and compile `proto/schema.proto` for Python (C++ target still pending -- no consumer until `src/ipc/` exists).
+- [x] Implement the Gymnasium MuJoCo smoke-test environment (placeholder arm; swap in a licensed Panda asset before real experiments).
+- [ ] Implement the Isaac Lab Panda environment and domain randomization (blocked on Isaac Sim GPU/Vulkan support under WSL2; see memory).
+- [x] Implement bounded, non-blocking ZeroMQ transport and stale-frame handling.
+- [x] Implement the thread-safe latest-observation ring buffer.
+- [x] Implement dummy policy adapter. LeRobot and OpenPI adapters not started.
+- [x] Implement action-chunk interpolation and safe fallback behavior.
+- [x] Add IPC unit tests (`tests/test_ipc.py`). Latency and soak tests not started.
 - [ ] Pin and document a reproducible container image.
 - [ ] Publish measured benchmarks and a randomized evaluation protocol.
 

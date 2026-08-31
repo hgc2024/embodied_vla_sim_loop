@@ -1,2 +1,7 @@
 .venv
 env_isaaclab
+generated/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/

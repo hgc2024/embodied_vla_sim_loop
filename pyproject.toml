@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embodied-vla-sim-loop"
+version = "0.1.0"
+description = "Asynchronous simulation-to-policy control loop for embodied AI experiments."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "UNLICENSED" }  # no project license has been chosen yet; see README "License and external assets"
+
+dependencies = [
+  "torch>=2.2",
+  "numpy>=1.26",
+  "gymnasium>=0.29",
+  "pyzmq>=25",
+  "protobuf>=5",
+  "opencv-python>=4.9",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+mujoco = ["mujoco>=3.1"]
+# Isaac Lab is tightly version-coupled to a specific Isaac Sim/CUDA/driver
+# combination and is installed separately per the README's Option B flow
+# (`pip install "isaaclab[isaacsim,all]==<version>"` inside its own env), not
+# as a normal extra of this project. This key exists so `.[isaac,dev]` from
+# the README stays valid; it intentionally pulls in nothing on its own.
+isaac = []
+dev = [
+  "pytest>=8",
+  "pytest-timeout>=2.3",
+]
+
+[tool.setuptools]
+packages = ["sim", "policy_server"]

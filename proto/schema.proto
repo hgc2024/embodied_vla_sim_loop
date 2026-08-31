@@ -1,0 +1,27 @@
+syntax = "proto3";
+package embodied;
+
+// Wire schema for the sim <-> policy transport. See the README "Architecture"
+// section for the fixed conventions this schema depends on but does not
+// itself encode: RGB is uint8 HWC, depth is float32 metres, joint positions
+// are radians, joint velocities are radians/second, and multi-byte fields
+// are little-endian. Shape (H, W, C) is carried out-of-band via env_config.yaml
+// (camera.width / camera.height) rather than in the message itself.
+
+message Observation {
+  uint64 timestamp_us = 1;
+  uint64 frame_id = 2;
+  bytes rgb_data = 3;
+  bytes depth_data = 4;
+  repeated float joint_positions = 5;
+  repeated float joint_velocities = 6;
+  string task_instruction = 7;
+}
+
+message ActionChunk {
+  uint64 timestamp_us = 1;
+  uint64 frame_id = 2;
+  repeated float actions = 3;
+  uint32 horizon = 4;
+  uint32 action_dim = 5;
+}

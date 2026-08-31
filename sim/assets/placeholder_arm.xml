@@ -1,0 +1,63 @@
+<!--
+  Placeholder 4-DOF arm for smoke-testing the sim loop plumbing (physics
+  stepping, joint state, RGB-D capture, domain randomization). Every geometry
+  primitive here is authored from scratch, so it carries no upstream license.
+
+  This is NOT the Panda robot referenced elsewhere in the README/config. Per
+  the README's "License and external assets" section, a real Panda MJCF must
+  be added by a future asset script with its source, revision, and license
+  recorded in an asset manifest before this stands in for real experiments.
+-->
+<mujoco model="placeholder_arm">
+  <compiler angle="radian"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".3 .4 .5" width="300" height="300"/>
+    <material name="grid" texture="grid" texrepeat="5 5" reflectance=".1"/>
+  </asset>
+
+  <worldbody>
+    <light name="top" pos="0 0 2" dir="0 0 -1" diffuse="1 1 1"/>
+    <geom name="floor" type="plane" size="1.5 1.5 0.1" material="grid"/>
+
+    <body name="table" pos="0.45 0 0.2">
+      <geom type="box" size="0.3 0.3 0.2" rgba="0.55 0.45 0.35 1"/>
+    </body>
+
+    <body name="base" pos="0 0 0.4">
+      <geom type="cylinder" size="0.05 0.02" rgba="0.2 0.2 0.2 1"/>
+      <body name="link1" pos="0 0 0.02">
+        <joint name="joint1" type="hinge" axis="0 0 1" range="-3.14159 3.14159" damping="0.2"/>
+        <geom type="capsule" fromto="0 0 0 0 0 0.15" size="0.03" rgba="0.8 0.2 0.2 1"/>
+        <body name="link2" pos="0 0 0.15">
+          <joint name="joint2" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="0.2"/>
+          <geom type="capsule" fromto="0 0 0 0.2 0 0" size="0.028" rgba="0.2 0.8 0.2 1"/>
+          <body name="link3" pos="0.2 0 0">
+            <joint name="joint3" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="0.2"/>
+            <geom type="capsule" fromto="0 0 0 0.2 0 0" size="0.025" rgba="0.2 0.2 0.8 1"/>
+            <body name="wrist" pos="0.2 0 0">
+              <joint name="joint4" type="hinge" axis="1 0 0" range="-3.14159 3.14159" damping="0.1"/>
+              <geom type="capsule" fromto="0 0 0 0 0 -0.08" size="0.02" rgba="0.6 0.6 0.6 1"/>
+              <camera name="wrist_cam" pos="0 0 -0.1" euler="3.14159 0 1.5708" fovy="60"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <body name="target" pos="0.45 0.1 0.44">
+      <freejoint/>
+      <geom type="box" size="0.02 0.02 0.02" rgba="1 0 0 1" mass="0.05"/>
+    </body>
+
+    <camera name="scene_cam" pos="1.2 -0.8 0.9" xyaxes="0.6 0.8 0 -0.4 0.3 0.87"/>
+  </worldbody>
+
+  <actuator>
+    <position name="act1" joint="joint1" kp="25" ctrlrange="-3.14159 3.14159"/>
+    <position name="act2" joint="joint2" kp="25" ctrlrange="-1.5708 1.5708"/>
+    <position name="act3" joint="joint3" kp="25" ctrlrange="-1.5708 1.5708"/>
+    <position name="act4" joint="joint4" kp="10" ctrlrange="-3.14159 3.14159"/>
+  </actuator>
+</mujoco>

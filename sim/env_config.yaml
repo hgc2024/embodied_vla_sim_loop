@@ -1,0 +1,38 @@
+# Single source of truth for simulator, camera, controller, transport, and
+# randomization settings. See the README "Configuration" section.
+simulator: mujoco                 # mujoco | isaac
+robot: panda                      # panda | kinova_gen3
+physics_hz: 120
+control_hz: 60
+
+camera:
+  width: 224
+  height: 224
+  rgb_encoding: raw               # raw | jpeg | png
+  depth_dtype: float32
+
+ipc:
+  observations: ipc:///tmp/vla_obs.ipc
+  actions: ipc:///tmp/vla_actions.ipc
+  high_water_mark: 2
+
+policy:
+  backend: dummy                  # dummy | lerobot | openpi
+  checkpoint: null
+  device: cuda
+  precision: fp16
+  action_horizon: 16
+  # Must match the simulator's actuator count (sim/mujoco_env.py derives its
+  # action space from the loaded MJCF's actuators). There is no shared robot
+  # registry yet, so this has to be kept in sync by hand -- the placeholder
+  # arm in sim/assets/placeholder_arm.xml has 4 actuated joints, not the 7 a
+  # real Panda would have.
+  action_dim: 4
+  compile: false
+
+domain_randomization:
+  enabled: true
+  camera_translation_m: 0.02
+  camera_rotation_deg: 3.0
+  mass_scale: [0.85, 1.15]
+  friction: [0.2, 1.1]
