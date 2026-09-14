@@ -28,10 +28,14 @@ mujoco = ["mujoco>=3.1"]
 # as a normal extra of this project. This key exists so `.[isaac,dev]` from
 # the README stays valid; it intentionally pulls in nothing on its own.
 isaac = []
+dashboard = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.30",
+]
 dev = [
   "pytest>=8",
   "pytest-timeout>=2.3",
 ]
 
 [tool.setuptools]
-packages = ["sim", "policy_server"]
+packages = ["sim", "policy_server", "dashboard"]

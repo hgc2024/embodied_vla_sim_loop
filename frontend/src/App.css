@@ -1,0 +1,309 @@
+.app {
+  min-height: 100vh;
+  padding: 16px 24px 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0 20px;
+}
+
+.app-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.connection-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.connection-badge.connected .dot {
+  background: var(--ok);
+}
+
+.info-banner {
+  margin-bottom: 16px;
+  padding: 10px 18px;
+}
+
+.info-banner-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.info-banner-toggle .chevron {
+  color: var(--text-muted);
+}
+
+.info-banner-body {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.info-banner-body p {
+  margin: 0 0 10px;
+}
+
+.info-banner-body p:last-child {
+  margin-bottom: 0;
+}
+
+.info-banner-body strong {
+  color: var(--text);
+}
+
+/* A dotted underline signals "hover for an explanation" wherever a plain
+   HTML `title` tooltip is attached, since native tooltips have no visual cue
+   of their own. */
+.hint {
+  cursor: help;
+  border-bottom: 1px dotted var(--text-muted);
+}
+
+.mode-explanation {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.camera-hint {
+  margin-bottom: 12px;
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .app-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.muted.small {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.task-instruction {
+  font-style: italic;
+  margin-bottom: 12px;
+}
+
+.camera-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.camera-grid figure {
+  margin: 0;
+}
+
+.camera-grid img {
+  width: 100%;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #000;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+}
+
+.camera-grid figcaption {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.telemetry-grid dt {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.telemetry-grid dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mode-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.mode-badge.predicted {
+  background: color-mix(in srgb, var(--ok) 20%, transparent);
+  color: var(--ok);
+}
+
+.mode-badge.fallback {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
+
+.joint-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.joint-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding-bottom: 6px;
+}
+
+.joint-table td {
+  padding: 4px 6px 4px 0;
+  vertical-align: middle;
+}
+
+.bar-track {
+  position: relative;
+  height: 8px;
+  width: 100px;
+  display: inline-block;
+  background: var(--border);
+  border-radius: 4px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--accent);
+}
+
+.bar-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-muted);
+  opacity: 0.5;
+}
+
+.bar-value {
+  display: inline-block;
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  min-width: 3.5em;
+}
+
+.controls-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.controls-row button {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.controls-row button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.controls-row button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dr-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 10px;
+}

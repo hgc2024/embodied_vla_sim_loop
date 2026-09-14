@@ -14,8 +14,12 @@ import pytest
 from sim.zmq_publisher import (
     ActionChunkPublisher,
     ActionChunkSubscriber,
+    CommandPublisher,
+    CommandSubscriber,
     ObservationPublisher,
     ObservationSubscriber,
+    StatusPublisher,
+    StatusSubscriber,
     pack_action_chunk,
     pack_observation,
     unpack_action_chunk,
@@ -131,6 +135,40 @@ def test_action_chunk_pubsub_roundtrip(endpoint):
         assert received is not None
         assert received["frame_id"] == 3
         np.testing.assert_allclose(received["actions"], sent["actions"])
+    finally:
+        pub.close()
+        sub.close()
+
+
+def test_status_pubsub_roundtrip(endpoint):
+    pub = StatusPublisher(endpoint, high_water_mark=2)
+    sub = StatusSubscriber(endpoint, high_water_mark=2)
+    try:
+        time.sleep(0.2)
+        sent = {"control_hz": 59.8, "mode": "predicted", "paused": False, "action_age_ms": None}
+        pub.send(sent)
+
+        received = sub.recv(timeout_ms=2000)
+        assert received == sent
+    finally:
+        pub.close()
+        sub.close()
+
+
+def test_command_delivery_is_not_conflated(endpoint):
+    """Unlike Observation/ActionChunk/Status, commands must never be dropped
+    -- a burst of clicks should all arrive, in order, even though the
+    transport is otherwise built around discarding backlog."""
+    sub = CommandSubscriber(endpoint)  # binds, per its docstring
+    pub = CommandPublisher(endpoint)  # connects
+    try:
+        time.sleep(0.2)
+        commands = [{"type": "pause"}, {"type": "step"}, {"type": "resume"}, {"type": "reset"}]
+        for command in commands:
+            pub.send(command)
+        time.sleep(0.2)
+
+        assert sub.drain() == commands
     finally:
         pub.close()
         sub.close()

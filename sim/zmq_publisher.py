@@ -22,6 +22,7 @@ code.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -178,3 +179,77 @@ class ActionChunkSubscriber(_ConflatingSubscriber):
 
 def now_us() -> int:
     return time.time_ns() // 1_000
+
+
+class StatusPublisher(_ConflatingPublisher):
+    """Sim-side: publishes the latest dashboard status snapshot as JSON.
+
+    Deliberately separate from the Observation/ActionChunk proto streams --
+    this carries dashboard/UI-only fields (paused, domain_randomization
+    enabled, achieved control_hz, ...) that have no business in the
+    research-relevant wire schema in proto/schema.proto.
+    """
+
+    def send(self, status: dict[str, Any]) -> None:
+        self._send(json.dumps(status).encode("utf-8"))
+
+
+class StatusSubscriber(_ConflatingSubscriber):
+    def recv(self, timeout_ms: int = 0) -> dict[str, Any] | None:
+        data = self._recv(timeout_ms)
+        if data is None:
+            return None
+        return json.loads(data.decode("utf-8"))
+
+
+class CommandPublisher:
+    """Dashboard-side: sends control commands (reset/pause/resume/step/...).
+
+    Uses PUSH, not PUB+CONFLATE -- a "reset" command must never be silently
+    dropped the way stale observations are, so this is a normal bounded
+    queue instead of a single-slot mailbox.
+
+    Connects rather than binds, unlike every other Publisher in this module
+    -- the sim process is the long-lived side here and the dashboard is the
+    one expected to restart often during development, so the sim owns the
+    stable bound address and the dashboard reconnects to it (ZMQ's PUSH/PULL
+    reconnects automatically; this just avoids the sim needing to notice a
+    dashboard restart at all).
+    """
+
+    def __init__(self, endpoint: str, high_water_mark: int = 100) -> None:
+        self._ctx = zmq.Context.instance()
+        self._socket = self._ctx.socket(zmq.PUSH)
+        self._socket.setsockopt(zmq.SNDHWM, high_water_mark)
+        self._socket.connect(endpoint)
+
+    def send(self, command: dict[str, Any]) -> None:
+        self._socket.send(json.dumps(command).encode("utf-8"), flags=zmq.NOBLOCK)
+
+    def close(self) -> None:
+        self._socket.close(linger=0)
+
+
+class CommandSubscriber:
+    """Sim-side: receives control commands. `drain()` is non-blocking and
+    never leaves a backlog, so a burst of clicks in the dashboard can't
+    build up latency in the physics loop."""
+
+    def __init__(self, endpoint: str, high_water_mark: int = 100) -> None:
+        self._ctx = zmq.Context.instance()
+        self._socket = self._ctx.socket(zmq.PULL)
+        self._socket.setsockopt(zmq.RCVHWM, high_water_mark)
+        self._socket.bind(endpoint)
+
+    def drain(self) -> list[dict[str, Any]]:
+        commands = []
+        while True:
+            try:
+                data = self._socket.recv(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                break
+            commands.append(json.loads(data.decode("utf-8")))
+        return commands
+
+    def close(self) -> None:
+        self._socket.close(linger=0)

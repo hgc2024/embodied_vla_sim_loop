@@ -102,10 +102,13 @@ class MujocoManipulationEnv(gym.Env):
             }
         )
 
+        # Constructed whenever ranges are configured at all, independent of
+        # `enabled` -- that flag only gates whether reset() applies it, so
+        # the dashboard can toggle it on/off at runtime (set_domain_randomization
+        # below) without needing the ranges re-supplied.
         dr_cfg = config.get("domain_randomization", {})
-        self.domain_randomizer = (
-            DomainRandomizer(self.model, dr_cfg) if dr_cfg.get("enabled", False) else None
-        )
+        self.domain_randomizer = DomainRandomizer(self.model, dr_cfg) if dr_cfg else None
+        self.domain_randomization_enabled = bool(dr_cfg.get("enabled", False))
 
         self.task_instruction = "pick up the block"
         self._frame_id = 0
@@ -116,11 +119,19 @@ class MujocoManipulationEnv(gym.Env):
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
-        if self.domain_randomizer is not None:
+        if self.domain_randomizer is not None and self.domain_randomization_enabled:
             self.domain_randomizer.randomize(self.np_random)
         mujoco.mj_forward(self.model, self.data)
         self._episode_step = 0
         return self._get_observation(), {}
+
+    def set_domain_randomization(self, enabled: bool) -> None:
+        if self.domain_randomizer is None:
+            raise ValueError(
+                "domain_randomization has no ranges configured (env_config.yaml's "
+                "domain_randomization block is empty), so it can't be toggled on"
+            )
+        self.domain_randomization_enabled = enabled
 
     def step(
         self, action: np.ndarray

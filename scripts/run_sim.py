@@ -5,6 +5,11 @@ policy inference (see README architecture): each control step applies whatever
 action is currently active -- a slice of the newest received ActionChunk, or a
 safe fallback (hold the last commanded action) if nothing fresh enough has
 arrived.
+
+Also drains dashboard commands (reset/pause/resume/step/domain randomization)
+and publishes a status snapshot each iteration -- see dashboard/server.py.
+Both are non-blocking and additive: pulling this thread out entirely would
+leave the sim<->policy loop this file's docstring describes completely intact.
 """
 
 from __future__ import annotations
@@ -28,12 +33,19 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sim.mujoco_env import MujocoManipulationEnv
-from sim.zmq_publisher import ActionChunkSubscriber, ObservationPublisher, now_us
+from sim.zmq_publisher import (
+    ActionChunkSubscriber,
+    CommandSubscriber,
+    ObservationPublisher,
+    StatusPublisher,
+    now_us,
+)
 
 logger = logging.getLogger("run_sim")
 
 BLEND_STEPS = 4  # control steps to ramp into a newly arrived chunk
 MAX_ACTION_AGE_US = 500_000  # 0.5s: older than this without a new chunk -> fallback
+STATUS_PERIOD_S = 0.2  # snappier than the 1s text log, cheap since it's tiny JSON
 
 
 class ActionChunkPlayer:
@@ -86,10 +98,31 @@ class ActionChunkPlayer:
         return self._last_action, False
 
     @property
-    def action_age_ms(self) -> float:
+    def action_age_ms(self) -> float | None:
         if self._chunk is None:
-            return float("inf")
+            return None
         return (now_us() - self._chunk["timestamp_us"]) / 1_000
+
+
+def _status(
+    env: MujocoManipulationEnv,
+    player: ActionChunkPlayer,
+    *,
+    control_hz: float,
+    frame_id: int,
+    is_fallback: bool,
+    paused: bool,
+) -> dict[str, Any]:
+    return {
+        "timestamp_us": now_us(),
+        "control_hz": control_hz,
+        "frame_id": frame_id,
+        "action_age_ms": player.action_age_ms,
+        "mode": "fallback" if is_fallback else "predicted",
+        "fallback_steps": player.fallback_steps,
+        "paused": paused,
+        "domain_randomization_enabled": env.domain_randomization_enabled,
+    }
 
 
 def run(config: dict[str, Any], max_steps: int | None = None) -> None:
@@ -101,18 +134,72 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
     action_sub = ActionChunkSubscriber(
         ipc_cfg["actions"], high_water_mark=ipc_cfg["high_water_mark"]
     )
+    command_sub = CommandSubscriber(ipc_cfg["commands"])
+    status_pub = StatusPublisher(ipc_cfg["status"])
     player = ActionChunkPlayer(action_dim=env.action_space.shape[0])
 
     control_period = 1.0 / config["control_hz"]
     obs, _ = env.reset()
     obs_pub.send(obs)
 
+    paused = False
+    step_once = False
+    is_fallback = True
+    achieved_hz = 0.0
+    resuming = False  # true for the first step after a pause, to reset the Hz window
+
     step = 0
     last_log = time.perf_counter()
+    last_status = time.perf_counter()
     steps_since_log = 0
     try:
         while max_steps is None or step < max_steps:
             loop_start = time.perf_counter()
+
+            for command in command_sub.drain():
+                ctype = command.get("type")
+                if ctype == "reset":
+                    obs, _ = env.reset()
+                    obs_pub.send(obs)
+                elif ctype == "pause":
+                    paused = True
+                elif ctype == "resume":
+                    paused = False
+                elif ctype == "step":
+                    step_once = True
+                elif ctype == "set_domain_randomization":
+                    env.set_domain_randomization(bool(command.get("enabled", False)))
+                else:
+                    logger.warning("ignoring unknown command: %r", command)
+
+            if paused and not step_once:
+                now = time.perf_counter()
+                if now - last_status >= STATUS_PERIOD_S:
+                    status_pub.send(
+                        _status(
+                            env,
+                            player,
+                            control_hz=0.0,
+                            frame_id=obs["frame_id"],
+                            is_fallback=is_fallback,
+                            paused=True,
+                        )
+                    )
+                    last_status = now
+                sleep_for = control_period - (time.perf_counter() - loop_start)
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+                resuming = True  # next real step starts a fresh Hz-averaging window
+                continue
+            step_once = False
+
+            if resuming:
+                # Otherwise the Hz window's elapsed time would include however
+                # long we were just paused, understating control_hz for one
+                # log/status cycle even though nothing was actually slow.
+                last_log = time.perf_counter()
+                steps_since_log = 0
+                resuming = False
 
             player.offer(action_sub.recv(timeout_ms=0))
             action, is_fallback = player.next_action()
@@ -130,7 +217,7 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
             if now - last_log >= 1.0:
                 achieved_hz = steps_since_log / (now - last_log)
                 logger.info(
-                    "control_hz=%.1f frame_id=%d action_age_ms=%.1f mode=%s fallback_steps=%d",
+                    "control_hz=%.1f frame_id=%d action_age_ms=%s mode=%s fallback_steps=%d",
                     achieved_hz,
                     obs["frame_id"],
                     player.action_age_ms,
@@ -138,6 +225,19 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
                     player.fallback_steps,
                 )
                 last_log, steps_since_log = now, 0
+
+            if now - last_status >= STATUS_PERIOD_S:
+                status_pub.send(
+                    _status(
+                        env,
+                        player,
+                        control_hz=achieved_hz,
+                        frame_id=obs["frame_id"],
+                        is_fallback=is_fallback,
+                        paused=False,
+                    )
+                )
+                last_status = now
 
             sleep_for = control_period - (time.perf_counter() - loop_start)
             if sleep_for > 0:
@@ -147,6 +247,8 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
     finally:
         obs_pub.close()
         action_sub.close()
+        command_sub.close()
+        status_pub.close()
         env.close()
 
 

@@ -8,12 +8,86 @@ the physics loop wait for model inference.
 > [!IMPORTANT]
 > The MuJoCo path (Option A) is implemented and runnable end to end with the
 > dummy policy: `pyproject.toml`, `proto/schema.proto`, `sim/`, `policy_server/`,
-> and `scripts/run_sim.py` / `scripts/run_policy.py` all exist. The MuJoCo
+> `scripts/run_sim.py` / `scripts/run_policy.py`, and a live browser dashboard
+> (`dashboard/` + `frontend/`, see "Dashboard" below) all exist. The MuJoCo
 > environment uses a placeholder 4-DOF arm (`sim/assets/placeholder_arm.xml`),
 > not a real Panda -- see that file's docstring. Isaac Lab support
 > (`sim/isaac_env.py`), the native C++ ZeroMQ client (`src/ipc/`), the Docker
 > image, CI, and real policy backends (LeRobot/OpenPI) are still scaffold only;
 > commands referencing those describe the intended workflow once they land.
+
+## In plain terms
+
+If "world models," "VLA policies," and "ZeroMQ" aren't your everyday
+vocabulary, start here before the more technical sections below.
+
+**What this actually is:** a simulated robot arm in a physics engine (MuJoCo),
+plus a second program that decides how to move it (the "policy"), running as
+two separate processes that talk to each other over messages instead of one
+waiting on the other. There's also a live dashboard (a webpage) you can open
+in a browser to watch it happen in real time and to poke at it (pause it,
+reset it, etc.).
+
+**Why two separate programs instead of one?** The whole point of this project
+is speed mismatch: physics needs to update dozens of times per second to look
+and behave right, but a real AI model deciding "what should the arm do next"
+can take much longer to think. If the simulation had to pause and wait every
+time it asked the AI a question, it would stutter badly. So instead, the
+simulation keeps running on its own clock, and whenever the AI's answer is
+ready, the simulation picks it up -- and if the AI takes too long, the arm
+just holds its position rather than freezing or crashing.
+
+**What you'll see if you open the dashboard right now:** the arm moving in
+small, seemingly aimless motions, not purposefully picking anything up. That
+is expected today, not a bug. Two pieces are still placeholders, filled in
+with the simplest possible thing so the surrounding machinery could be built
+and tested first:
+
+- **The robot arm** is a simple 4-jointed shape drawn from scratch
+  (`sim/assets/placeholder_arm.xml`), not a real robot model like a Franka
+  Panda.
+- **The "policy"** deciding how to move it is currently the *dummy policy* --
+  it outputs small random numbers on purpose, not a trained AI. The caption
+  "pick up the block" you'll see under the camera view is a fixed label, not
+  something anything is actually trying to do yet.
+
+Once a real robot model and a real trained policy are plugged in later (see
+"Implementation milestones" near the bottom), the exact same dashboard and
+plumbing will show the arm actually attempting the task -- nothing about the
+dashboard or the transport layer needs to change for that.
+
+### Reading the dashboard
+
+| Panel | What it means in plain language |
+| --- | --- |
+| Wrist camera (RGB / Depth) | What a camera mounted on the arm's own wrist sees. Because it's mounted *on* the arm rather than watching it from across the room, the view is often an extreme close-up of whatever surface is nearest -- that's normal, not a rendering bug. "Depth" is the same view, but colored by distance instead of by color: closer surfaces get one color, farther ones another. |
+| Control rate | How many times per second the simulation is currently updating. Should sit near 60. |
+| Action source | **Predicted** = the arm is currently following instructions from the policy. **Fallback** = no fresh instruction arrived in time, so the arm is just holding its last position rather than doing anything erratic. Neither is an error; fallback is a deliberate safety behavior. |
+| Action age | How old the instruction currently driving the arm is, in milliseconds. |
+| Fallback steps | A running count of how many times the simulation has had to fall back to "just hold position" since it started. |
+| Domain randomization | Whether small random variations (lighting, camera position, object weight, friction) are being applied each time the episode resets -- see "Domain randomization" below for why that matters. |
+| Controls | Reset starts a new episode. Pause freezes the physics entirely (the arm stops moving, camera stops updating). Step advances exactly one instant while paused, for inspecting things frame by frame. |
+| Joint state | The arm's own sense of its joint angles and speeds -- the numbers a real robot's internal sensors would report. |
+
+### A few terms used elsewhere in this document
+
+- **Policy**: whatever is deciding what action to take next, given what the
+  camera/sensors currently show. Can be as simple as random numbers (the
+  dummy policy used today) or a full trained AI model.
+- **VLA (Vision-Language-Action) policy**: an AI model that takes in a camera
+  image and a text instruction (like "pick up the block") and outputs robot
+  actions -- the eventual replacement for the dummy policy.
+- **Action chunk**: instead of asking the policy for one action at a time
+  (slow), it's asked for a short sequence of several future actions at once,
+  which the simulator can keep executing even while the next request is
+  still being worked on.
+- **Domain randomization**: deliberately varying things like lighting, object
+  weight, and friction slightly every episode, so that a policy trained in
+  simulation doesn't just memorize one exact simulated scene and fail on
+  anything slightly different (including, eventually, the real world).
+- **ZeroMQ / message passing**: the library used for the two programs
+  (simulation and policy) to send data back and forth quickly without one
+  blocking on the other.
 
 ## Goals
 
@@ -99,13 +173,17 @@ embodied-vla-sim-loop/
 │   ├── server.py
 │   ├── vla_wrapper.py
 │   └── ring_buffer.py
+├── dashboard/
+│   └── server.py
+├── frontend/            # React + Vite dashboard UI, see frontend/README.md
 ├── src/ipc/
 │   ├── zmq_client.cpp
 │   └── zmq_server.cpp
 ├── scripts/
 │   ├── compile_proto.sh
 │   ├── run_sim.py
-│   └── run_policy.py
+│   ├── run_policy.py
+│   └── run_dashboard.py
 ├── tests/
 │   ├── test_ipc.py
 │   └── test_policy_latency.py
@@ -128,6 +206,7 @@ Install these before creating the Python environment:
 | --- | --- | --- |
 | Git | Clone this project and optional policy repositories | [git-scm.com/downloads](https://git-scm.com/downloads) |
 | Python | Core runtime; use the version required by the chosen simulator | [python.org](https://www.python.org/downloads/) or Miniforge |
+| Node.js (only for the dashboard) | Build/run the `frontend/` dashboard UI | [nvm](https://github.com/nvm-sh/nvm) (`nvm install --lts`) or [nodejs.org](https://nodejs.org/); on WSL2 install a native Linux Node via nvm rather than relying on a Windows-side install reachable through `/mnt/c` -- it's slow and its `#!/usr/bin/env node` shebang scripts (Vite included) won't resolve `node` on `PATH` |
 | `uv` or Miniforge | Isolated Python environments | [uv installation](https://docs.astral.sh/uv/getting-started/installation/) / [Miniforge releases](https://github.com/conda-forge/miniforge/releases) |
 | Protocol Buffer compiler (`protoc`) | Generate Python and C++ bindings from `proto/schema.proto` | [official installation guide](https://protobuf.dev/installation/) |
 | CMake and a C++17 compiler | Build the optional native ZeroMQ clients | `build-essential cmake pkg-config` on Ubuntu; Visual Studio Build Tools on Windows |
@@ -387,6 +466,33 @@ The policy process should log model warm-up separately from steady-state latency
 The simulator should report physics/control frequency, current frame ID, action
 age, dropped observations, and whether it is executing a predicted or safe fallback
 action. Stopping or restarting the policy server must not block the physics loop.
+
+## Dashboard
+
+A live browser view of the running loop -- wrist camera (RGB + depth),
+control rate, action age, predicted-vs-fallback mode, joint state, and
+controls (reset episode, pause/resume/step, toggle domain randomization).
+It's a third, non-blocking observer: `dashboard/server.py` subscribes to the
+same Observation stream (plus a dashboard-only Status stream) the policy
+server does, and can't slow down or interfere with the sim<->policy loop by
+existing, misbehaving, or not running at all.
+
+With the sim (and optionally the policy server) from the previous section
+already running, in two more terminals:
+
+```bash
+# Terminal 3 -- bridge server (Python, talks ZeroMQ <-> WebSocket/REST)
+python scripts/run_dashboard.py --config sim/env_config.yaml
+
+# Terminal 4 -- frontend dev server (first time: cd frontend && npm install)
+cd frontend && npm run dev
+```
+
+Open the URL Vite prints (`http://127.0.0.1:5173` by default). Reset/pause/
+resume/step and the domain-randomization toggle send commands to the sim over
+a dedicated channel (`ipc:///tmp/vla_commands.ipc` by default) that, unlike
+observations and actions, is never dropped under backpressure -- see
+`sim/zmq_publisher.py`'s `CommandPublisher`/`CommandSubscriber`.
 
 ## Domain randomization
 

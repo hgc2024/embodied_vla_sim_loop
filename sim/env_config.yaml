@@ -15,6 +15,11 @@ ipc:
   observations: ipc:///tmp/vla_obs.ipc
   actions: ipc:///tmp/vla_actions.ipc
   high_water_mark: 2
+  # Dashboard-only channels (see dashboard/server.py). Separate from the
+  # observations/actions streams above so the sim<->policy research loop's
+  # wire format stays untouched by anything visualization-specific.
+  status: ipc:///tmp/vla_status.ipc
+  commands: ipc:///tmp/vla_commands.ipc
 
 policy:
   backend: dummy                  # dummy | lerobot | openpi
