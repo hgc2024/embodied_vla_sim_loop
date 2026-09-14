@@ -20,9 +20,18 @@ ipc:
   # wire format stays untouched by anything visualization-specific.
   status: ipc:///tmp/vla_status.ipc
   commands: ipc:///tmp/vla_commands.ipc
+  overview: ipc:///tmp/vla_overview.ipc
 
 policy:
-  backend: dummy                  # dummy | lerobot | openpi
+  # scripted_reach is a hand-written baseline (see mujoco_env.py's
+  # compute_scripted_reach_action), not a trained model -- it's the default
+  # here so the dashboard shows visibly purposeful motion out of the box.
+  # dummy is the original plumbing smoke test (small random actions).
+  # openpi talks to a real, separately-served OpenPI checkpoint (see
+  # policy_server/adapters/openpi_policy.py -- requires policy.openpi below
+  # and running policy_server from its own environment, not this project's
+  # core .venv). lerobot is not implemented yet.
+  backend: scripted_reach         # scripted_reach | dummy | openpi | lerobot
   checkpoint: null
   device: cuda
   precision: fp16
@@ -34,6 +43,19 @@ policy:
   # real Panda would have.
   action_dim: 4
   compile: false
+  # Only read when backend: openpi. host/port point at an already-running
+  # OpenPI websocket policy server (OpenPI's own scripts/serve_policy.py, not
+  # anything in this repo). image_key/state_key/prompt_key/action_key map
+  # this project's Observation fields onto whatever dict keys the specific
+  # served checkpoint expects -- checkpoint-specific, so these are only sane
+  # defaults matching OpenPI's droid_policy.py, not a universal convention.
+  openpi:
+    host: 127.0.0.1
+    port: 8765
+    image_key: observation/wrist_image_left
+    state_key: observation/joint_position
+    prompt_key: prompt
+    action_key: actions
 
 domain_randomization:
   enabled: true

@@ -18,12 +18,16 @@ from sim.zmq_publisher import (
     CommandSubscriber,
     ObservationPublisher,
     ObservationSubscriber,
+    OverviewPublisher,
+    OverviewSubscriber,
     StatusPublisher,
     StatusSubscriber,
     pack_action_chunk,
     pack_observation,
+    pack_overview_frame,
     unpack_action_chunk,
     unpack_observation,
+    unpack_overview_frame,
 )
 
 
@@ -169,6 +173,31 @@ def test_command_delivery_is_not_conflated(endpoint):
         time.sleep(0.2)
 
         assert sub.drain() == commands
+    finally:
+        pub.close()
+        sub.close()
+
+
+def test_overview_frame_roundtrip():
+    rgb = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    frame_id, restored = unpack_overview_frame(pack_overview_frame(42, rgb), height=4, width=4)
+    assert frame_id == 42
+    np.testing.assert_array_equal(restored, rgb)
+
+
+def test_overview_pubsub_roundtrip(endpoint):
+    pub = OverviewPublisher(endpoint, high_water_mark=2)
+    sub = OverviewSubscriber(endpoint, height=4, width=4, high_water_mark=2)
+    try:
+        time.sleep(0.2)
+        rgb = np.full((4, 4, 3), 200, dtype=np.uint8)
+        pub.send(7, rgb)
+
+        received = sub.recv(timeout_ms=2000)
+        assert received is not None
+        frame_id, received_rgb = received
+        assert frame_id == 7
+        np.testing.assert_array_equal(received_rgb, rgb)
     finally:
         pub.close()
         sub.close()

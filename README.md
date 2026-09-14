@@ -6,15 +6,21 @@ environment to an open-source Vision-Language-Action (VLA) policy without making
 the physics loop wait for model inference.
 
 > [!IMPORTANT]
-> The MuJoCo path (Option A) is implemented and runnable end to end with the
-> dummy policy: `pyproject.toml`, `proto/schema.proto`, `sim/`, `policy_server/`,
+> The MuJoCo path (Option A) is implemented and runnable end to end:
+> `pyproject.toml`, `proto/schema.proto`, `sim/`, `policy_server/`,
 > `scripts/run_sim.py` / `scripts/run_policy.py`, and a live browser dashboard
-> (`dashboard/` + `frontend/`, see "Dashboard" below) all exist. The MuJoCo
-> environment uses a placeholder 4-DOF arm (`sim/assets/placeholder_arm.xml`),
-> not a real Panda -- see that file's docstring. Isaac Lab support
-> (`sim/isaac_env.py`), the native C++ ZeroMQ client (`src/ipc/`), the Docker
-> image, CI, and real policy backends (LeRobot/OpenPI) are still scaffold only;
-> commands referencing those describe the intended workflow once they land.
+> (`dashboard/` + `frontend/`, see "Dashboard" below) all exist, and the
+> dashboard's default policy (`scripted_reach`) drives the arm toward the
+> target object with a real (hand-written, not trained) controller. The
+> MuJoCo environment uses a placeholder 4-DOF arm
+> (`sim/assets/placeholder_arm.xml`), not a real Panda -- see that file's
+> docstring. `policy_server/adapters/openpi_policy.py` is a real adapter
+> against a live OpenPI checkpoint server (see "Choose a policy backend"),
+> but this project ships neither a checkpoint nor OpenPI's model code.
+> Isaac Lab support (`sim/isaac_env.py`), the native C++ ZeroMQ client
+> (`src/ipc/`), the Docker image, CI, and the LeRobot adapter are still
+> scaffold only; commands referencing those describe the intended workflow
+> once they land.
 
 ## In plain terms
 
@@ -37,32 +43,39 @@ simulation keeps running on its own clock, and whenever the AI's answer is
 ready, the simulation picks it up -- and if the AI takes too long, the arm
 just holds its position rather than freezing or crashing.
 
-**What you'll see if you open the dashboard right now:** the arm moving in
-small, seemingly aimless motions, not purposefully picking anything up. That
-is expected today, not a bug. Two pieces are still placeholders, filled in
-with the simplest possible thing so the surrounding machinery could be built
-and tested first:
+**What you'll see if you open the dashboard right now:** the arm reaching
+toward the orange block on the table, using a hand-written "move toward it"
+controller (`scripted_reach`, the default) -- genuinely goal-directed motion,
+but not a trained AI. Two pieces are still placeholders, filled in with the
+simplest possible thing so the surrounding machinery could be built and
+tested first:
 
 - **The robot arm** is a simple 4-jointed shape drawn from scratch
   (`sim/assets/placeholder_arm.xml`), not a real robot model like a Franka
   Panda.
-- **The "policy"** deciding how to move it is currently the *dummy policy* --
-  it outputs small random numbers on purpose, not a trained AI. The caption
-  "pick up the block" you'll see under the camera view is a fixed label, not
-  something anything is actually trying to do yet.
+- **The controller** deciding how to move it is currently
+  `compute_scripted_reach_action` -- straight-line proportional feedback
+  toward the block's true position, which the controller is allowed to see
+  directly because it's part of the simulator itself; a real deployed policy
+  would only ever see the camera images and joint state, never ground truth
+  like that. The caption "pick up the block" you'll see is a fixed label --
+  the controller only reaches toward the block, it doesn't grasp it (the
+  gripper isn't articulated).
 
 Once a real robot model and a real trained policy are plugged in later (see
-"Implementation milestones" near the bottom), the exact same dashboard and
-plumbing will show the arm actually attempting the task -- nothing about the
-dashboard or the transport layer needs to change for that.
+"Choose a policy backend" and "Implementation milestones"), the exact same
+dashboard and plumbing will show the arm attempting the task from vision
+alone -- nothing about the dashboard or the transport layer needs to change
+for that.
 
 ### Reading the dashboard
 
 | Panel | What it means in plain language |
 | --- | --- |
-| Wrist camera (RGB / Depth) | What a camera mounted on the arm's own wrist sees. Because it's mounted *on* the arm rather than watching it from across the room, the view is often an extreme close-up of whatever surface is nearest -- that's normal, not a rendering bug. "Depth" is the same view, but colored by distance instead of by color: closer surfaces get one color, farther ones another. |
+| Scene (overview camera) | A third-person view of the whole arm, table, and target block, from a fixed camera watching the scene -- not attached to the arm. This is the main "does this look like it's doing something" view. |
+| Wrist camera (RGB / Depth) | What a camera mounted on the arm's own wrist sees, shown smaller below the scene view. Because it's mounted *on* the arm rather than watching it from across the room, it's often an extreme close-up of whatever surface is nearest -- that's normal, not a rendering bug. "Depth" is the same view, but colored by distance instead of by color: closer surfaces get one color, farther ones another. |
 | Control rate | How many times per second the simulation is currently updating. Should sit near 60. |
-| Action source | **Predicted** = the arm is currently following instructions from the policy. **Fallback** = no fresh instruction arrived in time, so the arm is just holding its last position rather than doing anything erratic. Neither is an error; fallback is a deliberate safety behavior. |
+| Action source | **Scripted** = the hand-written reach controller is driving the arm (today's default). **Predicted** = a policy server (dummy or a real one, e.g. OpenPI) is driving it instead. **Fallback** = no fresh instruction arrived in time, so the arm is just holding its last position rather than doing anything erratic. None of these are errors; fallback is a deliberate safety behavior. |
 | Action age | How old the instruction currently driving the arm is, in milliseconds. |
 | Fallback steps | A running count of how many times the simulation has had to fall back to "just hold position" since it started. |
 | Domain randomization | Whether small random variations (lighting, camera position, object weight, friction) are being applied each time the episode resets -- see "Domain randomization" below for why that matters. |
@@ -72,8 +85,10 @@ dashboard or the transport layer needs to change for that.
 ### A few terms used elsewhere in this document
 
 - **Policy**: whatever is deciding what action to take next, given what the
-  camera/sensors currently show. Can be as simple as random numbers (the
-  dummy policy used today) or a full trained AI model.
+  camera/sensors currently show. Can be as simple as random numbers, a
+  hand-written controller (`scripted_reach`, today's default -- strictly
+  speaking not a "policy" in the learned sense, but the same role in the
+  architecture), or a full trained AI model.
 - **VLA (Vision-Language-Action) policy**: an AI model that takes in a camera
   image and a text instruction (like "pick up the block") and outputs robot
   actions -- the eventual replacement for the dummy policy.
@@ -98,7 +113,8 @@ dashboard or the transport layer needs to change for that.
 - Predict short action horizons so the controller can continue while a newer
   observation is being processed.
 - Support visual and physical domain randomization for sim-to-real experiments.
-- Start with a dummy PyTorch policy, then plug in LeRobot or OpenPI checkpoints.
+- Start with a dummy/scripted baseline, then plug in a real OpenPI (implemented)
+  or LeRobot (not yet) checkpoint.
 
 This is a research prototype, not a safety-rated robot controller. Test policies
 in simulation before connecting real hardware, and add workspace limits, velocity
@@ -352,10 +368,92 @@ compiler and protobuf runtime.
 
 ## Choose a policy backend
 
-Start with the dummy PyTorch policy. It validates shapes, transport, scheduling,
-and latency without downloading model weights. A real VLA model also needs a
-robot-specific observation transform, action representation, normalization
-statistics, and checkpoint—not just a model file.
+Start with the dummy policy (small random actions) or `scripted_reach` (a
+hand-written proportional controller that drives the end effector toward the
+target object -- see `mujoco_env.py`'s `compute_scripted_reach_action`, the
+dashboard's default). Both validate shapes, transport, scheduling, and
+latency without downloading model weights or a trained model existing at
+all; `scripted_reach` additionally exercises genuinely goal-directed motion.
+Neither is a policy in the learned sense.
+
+A real VLA model also needs a robot-specific observation transform, action
+representation, normalization statistics, and checkpoint -- not just a model
+file. Two pieces of scaffolding exist for this already, in `policy_server/`:
+
+- `normalizer.py` -- per-dimension affine normalization (`Normalizer`) plus
+  a no-op stand-in (`IdentityNormalizer`) with the same interface, so a real
+  fitted normalizer drops in later without changing call sites.
+- `observation_history.py` -- stacks the last `obs_horizon` observations a
+  backend actually received into its `predict()` call, instead of only the
+  single newest frame. Every backend implemented so far declares
+  `obs_horizon = 1` (no history needed yet); a policy trained on multi-frame
+  context would declare more.
+
+Both are original code, not copied from anywhere, but the *shape* of the
+idea in each is the same one used throughout this line of research: see
+[Diffusion Policy](https://github.com/real-stanford/diffusion_policy)'s
+`LinearNormalizer` and its `n_obs_steps` convention
+(`diffusion_policy/policy/base_image_policy.py`) for the reference this was
+checked against.
+
+### OpenPI
+
+`policy_server/adapters/openpi_policy.py` implements a real adapter against
+[OpenPI](https://github.com/Physical-Intelligence/openpi)'s actual, published
+`openpi-client` PyPI package -- not a reimplementation of their serving or
+model code. It's genuine integration: install their library, point it at a
+real running OpenPI policy server, and it works.
+
+**Two things to know before using it:**
+
+1. **Install `openpi-client` into its own environment, separate from this
+   project's core `.venv`.** It pins `numpy<2.0.0`, which conflicts with the
+   numpy 2.x this project's torch/mujoco need -- installing
+   `.[openpi]` into the same venv as `.[mujoco]` will downgrade numpy and can
+   break both. Run `policy_server` from that separate environment when using
+   the `openpi` backend:
+
+   ```bash
+   python -m venv .venv-openpi
+   source .venv-openpi/bin/activate
+   python -m pip install -e ".[openpi]"
+   ```
+
+   (`typing_extensions` is pinned alongside `openpi-client` in that extra
+   because `openpi-client` 0.1.2 imports it without declaring it as a
+   dependency -- a real gap in their package metadata, found and worked
+   around while verifying this adapter, not an assumption.)
+
+2. **This project supplies neither a checkpoint nor OpenPI's model code.**
+   You still need a real OpenPI policy server already running and reachable
+   (OpenPI's own `scripts/serve_policy.py` from a real checkpoint, following
+   OpenPI's own README) before pointing `policy.backend: openpi` at it. Set
+   `policy.openpi.host`/`port` in `sim/env_config.yaml` to that server, and
+   `image_key`/`state_key`/`prompt_key`/`action_key` to match whatever dict
+   keys that specific checkpoint expects -- this project's Observation (one
+   wrist camera, an N-joint arm, no gripper) doesn't match any published
+   checkpoint's expected input exactly, so the defaults (matching OpenPI's
+   `droid_policy.py`) are a starting point, not a guarantee.
+
+**An architectural note worth being explicit about:** OpenPI's own reference
+client (`openpi_client.action_chunk_broker.ActionChunkBroker`) calls `infer()`
+synchronously and blocks the robot's control loop on the websocket
+round-trip whenever the current action chunk runs out -- their real-time
+story is "block once per chunk, amortized." This project's transport
+(`sim/zmq_publisher.py`) is fully async instead, by design: physics never
+blocks on `OpenPIPolicy.predict()`, however long it takes -- the sim just
+keeps playing the last chunk, or falls back to holding position, until a
+fresh one is ready (see the "Architecture" section above). Wrapping OpenPI's
+synchronous client this way doesn't change how OpenPI itself works; it just
+means the blocking happens on the policy server's own thread, never on the
+simulator's.
+
+Published OpenPI checkpoints can be large and some require substantial GPU
+memory to serve; pin the OpenPI commit and checkpoint URI you're using. Do
+not assume a checkpoint trained for ALOHA or DROID directly matches this
+project's placeholder arm's action space just because both adapters exist --
+the `image_key`/`state_key`/`action_key` mapping above only aligns the wire
+format, not the actual robot geometry, joint count, or action convention.
 
 ### LeRobot
 
@@ -383,68 +481,40 @@ Record the checkpoint repository, revision/commit, normalization statistics, and
 expected camera/state/action keys in experiment configuration. Never benchmark a
 floating `main` revision as though it were reproducible.
 
-### OpenPI
-
-OpenPI has its own dependency lock and setup workflow. Clone it outside this
-repository and follow its [official README](https://github.com/Physical-Intelligence/openpi)
-rather than merging its dependency set into the core environment:
-
-```bash
-git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git
-cd openpi
-uv sync
-```
-
-OpenPI can download published checkpoints on first use. These are large, and some
-configurations require substantial GPU memory. Pin the OpenPI commit and checkpoint
-URI. The clean integration boundary is a separately launched OpenPI inference
-service with this project's adapter translating the observation/action schema.
-Do not assume an OpenPI checkpoint trained for ALOHA or DROID directly matches a
-Panda or Kinova action space.
 
 ## Configuration
 
-`sim/env_config.yaml` is intended to be the single source of truth for simulator,
-camera, controller, transport, and randomization settings. A representative
-configuration is:
+`sim/env_config.yaml` is the single source of truth for simulator, camera,
+controller, transport, and randomization settings -- read that file directly
+for the current, complete configuration (it's short and commented); the
+highlights:
 
 ```yaml
 simulator: mujoco                 # mujoco | isaac
-robot: panda                      # panda | kinova_gen3
 physics_hz: 120
 control_hz: 60
 
 camera:
   width: 224
   height: 224
-  rgb_encoding: raw               # raw | jpeg | png
   depth_dtype: float32
 
-ipc:
-  observations: ipc:///tmp/vla_obs.ipc
-  actions: ipc:///tmp/vla_actions.ipc
-  high_water_mark: 2
-
 policy:
-  backend: dummy                  # dummy | lerobot | openpi
-  checkpoint: null
-  device: cuda
-  precision: fp16
+  backend: scripted_reach         # scripted_reach | dummy | openpi | lerobot
   action_horizon: 16
-  compile: false
-
-domain_randomization:
-  enabled: true
-  camera_translation_m: 0.02
-  camera_rotation_deg: 3.0
-  mass_scale: [0.85, 1.15]
-  friction: [0.2, 1.1]
+  action_dim: 4                   # must match the loaded MJCF's actuator count
 ```
 
-Use `tcp://127.0.0.1:5555` and `tcp://127.0.0.1:5556` instead of the two `ipc://`
-addresses on native Windows or when simulator and policy run in different
-containers. Bind only to trusted interfaces; observations and actions are not
-authenticated or encrypted by ZeroMQ by default.
+The real file additionally has an `ipc` block (five endpoints: observations,
+actions, plus the dashboard-only status/commands/overview channels -- see
+"Dashboard" below), a `policy.openpi` sub-block (only read when
+`backend: openpi`, see "Choose a policy backend" above), and the
+`domain_randomization` ranges (see that section below).
+
+Use `tcp://127.0.0.1:5555`-style addresses instead of `ipc://` on native
+Windows or when simulator and policy run in different containers. Bind only
+to trusted interfaces; observations and actions are not authenticated or
+encrypted by ZeroMQ by default.
 
 ## Run the loop
 
@@ -577,9 +647,11 @@ smaller checkpoint, or a higher-end GPU.
 - [ ] Implement the Isaac Lab Panda environment and domain randomization (blocked on Isaac Sim GPU/Vulkan support under WSL2; see memory).
 - [x] Implement bounded, non-blocking ZeroMQ transport and stale-frame handling.
 - [x] Implement the thread-safe latest-observation ring buffer.
-- [x] Implement dummy policy adapter. LeRobot and OpenPI adapters not started.
+- [x] Implement dummy, scripted-reach, and OpenPI policy adapters. LeRobot not started.
 - [x] Implement action-chunk interpolation and safe fallback behavior.
-- [x] Add IPC unit tests (`tests/test_ipc.py`). Latency and soak tests not started.
+- [x] Add a live browser dashboard (`dashboard/` + `frontend/`) with reset/pause/step/domain-randomization controls.
+- [x] Add observation-history stacking and a normalization scaffold (`policy_server/observation_history.py`, `normalizer.py`).
+- [x] Add IPC and policy-server unit tests (`tests/test_ipc.py`, `tests/test_policy_server.py`). Latency and soak tests not started.
 - [ ] Pin and document a reproducible container image.
 - [ ] Publish measured benchmarks and a randomized evaluation protocol.
 
@@ -591,4 +663,14 @@ model checkpoints retain their upstream licenses and may impose additional usage
 conditions. Keep an asset manifest containing each source URL, exact revision,
 checksum, license, and local destination; do not commit gated checkpoints or
 credentials to Git.
+
+`.reference/` (gitignored, never committed) holds full local checkouts of
+[Diffusion Policy](https://github.com/real-stanford/diffusion_policy) (MIT)
+and [OpenPI](https://github.com/Physical-Intelligence/openpi) (Apache-2.0),
+kept for design-pattern analysis while building `policy_server/normalizer.py`,
+`observation_history.py`, and `adapters/openpi_policy.py`. Both licenses would
+permit direct reuse with attribution, but this project's own code in those
+files is original, written against the public interfaces those reference
+codebases expose (their real `openpi-client` PyPI package, and the general
+shape of `LinearNormalizer`/`n_obs_steps`), not copied from their source.
 

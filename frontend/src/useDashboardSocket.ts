@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { DashboardMessage, FrameMessage, StatusMessage } from "./types";
+import type { DashboardMessage, FrameMessage, OverviewMessage, StatusMessage } from "./types";
 
 const WS_URL = import.meta.env.VITE_DASHBOARD_WS_URL ?? "ws://127.0.0.1:8000/ws";
 const RECONNECT_DELAY_MS = 1000;
@@ -7,6 +7,7 @@ const RECONNECT_DELAY_MS = 1000;
 export interface DashboardSocketState {
   connected: boolean;
   frame: FrameMessage | null;
+  overview: OverviewMessage | null;
   status: StatusMessage | null;
 }
 
@@ -17,6 +18,7 @@ export interface DashboardSocketState {
 export function useDashboardSocket(): DashboardSocketState {
   const [connected, setConnected] = useState(false);
   const [frame, setFrame] = useState<FrameMessage | null>(null);
+  const [overview, setOverview] = useState<OverviewMessage | null>(null);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -43,6 +45,8 @@ export function useDashboardSocket(): DashboardSocketState {
         const message = JSON.parse(event.data) as DashboardMessage;
         if (message.type === "frame") {
           setFrame(message);
+        } else if (message.type === "overview") {
+          setOverview(message);
         } else if (message.type === "status") {
           setStatus(message);
         }
@@ -57,5 +61,5 @@ export function useDashboardSocket(): DashboardSocketState {
     };
   }, []);
 
-  return { connected, frame, status };
+  return { connected, frame, overview, status };
 }

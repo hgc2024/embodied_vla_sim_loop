@@ -8,7 +8,7 @@ import { TelemetryPanel } from "./components/TelemetryPanel";
 import { useDashboardSocket } from "./useDashboardSocket";
 
 function App() {
-  const { connected, frame, status } = useDashboardSocket();
+  const { connected, frame, overview, status } = useDashboardSocket();
 
   return (
     <div className="app">
@@ -20,7 +20,7 @@ function App() {
       <InfoBanner />
 
       <main className="app-grid">
-        <CameraPanel frame={frame} />
+        <CameraPanel frame={frame} overview={overview} />
         <div className="sidebar">
           <TelemetryPanel status={status} />
           <ControlsPanel status={status} />

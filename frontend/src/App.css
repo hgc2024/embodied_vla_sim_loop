@@ -148,6 +148,26 @@
   margin-bottom: 12px;
 }
 
+.overview-image {
+  width: 100%;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #000;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  margin-bottom: 14px;
+}
+
+.wrist-cam-row {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.wrist-cam-row > .muted {
+  margin-bottom: 8px;
+}
+
 .camera-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -210,6 +230,11 @@
 .mode-badge.fallback {
   background: color-mix(in srgb, var(--warn) 20%, transparent);
   color: var(--warn);
+}
+
+.mode-badge.scripted {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
 }
 
 .joint-table {

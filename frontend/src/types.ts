@@ -14,16 +14,27 @@ export interface FrameMessage {
   depth_jpeg: string; // base64-encoded JPEG (colorized depth)
 }
 
+// Third-person view -- see mujoco_env.py's render_overview() docstring for
+// why it's a separate message from FrameMessage rather than another field
+// on it.
+export interface OverviewMessage {
+  type: "overview";
+  frame_id: number;
+  overview_jpeg: string; // base64-encoded JPEG
+}
+
+export type ActionMode = "predicted" | "fallback" | "scripted";
+
 export interface StatusMessage {
   type: "status";
   timestamp_us: number;
   control_hz: number;
   frame_id: number;
   action_age_ms: number | null;
-  mode: "predicted" | "fallback";
+  mode: ActionMode;
   fallback_steps: number;
   paused: boolean;
   domain_randomization_enabled: boolean;
 }
 
-export type DashboardMessage = FrameMessage | StatusMessage;
+export type DashboardMessage = FrameMessage | OverviewMessage | StatusMessage;

@@ -27,13 +27,13 @@ export function InfoBanner() {
             physics never has to pause and wait for the policy to think.
           </p>
           <p>
-            <strong>Right now the arm won't look like it's doing anything on
-            purpose</strong> -- that's expected. The robot arm is a simple
-            placeholder shape, and the "policy" driving it is a dummy that
-            outputs small random moves, not a trained AI yet. This dashboard is
-            here to prove the wiring works; a real robot model and a trained
-            policy come later. See the README's "In plain terms" section for
-            more, including what each panel below means.
+            The arm here is reaching toward the orange block using a
+            <strong> hand-written "reach toward it" controller</strong>, not a
+            trained AI yet -- that's a deliberate placeholder so the dashboard
+            shows real, goal-directed motion before any model exists. The
+            robot itself is also a simple placeholder shape, not a real robot
+            model. See the README's "In plain terms" section for more,
+            including what each panel below means.
           </p>
         </div>
       )}

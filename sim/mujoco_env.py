@@ -70,6 +70,15 @@ class MujocoManipulationEnv(gym.Env):
             self.model, height=self.cam_height, width=self.cam_width
         )
         self._depth_renderer.enable_depth_rendering()
+        # Third-person view for humans watching the dashboard -- deliberately
+        # not part of _get_observation()/the Observation proto below: a real
+        # robot has no free-floating camera watching itself from outside, so
+        # this stays a dashboard-only debug stream (see zmq_publisher.py's
+        # OverviewPublisher and dashboard/server.py).
+        self._overview_renderer = mujoco.Renderer(
+            self.model, height=self.cam_height, width=self.cam_width
+        )
+        self._overview_camera_name = "scene_cam"
 
         # Controllable (hinge) joints, in qpos/qvel order -- excludes the
         # target object's freejoint, which is simulated but not observed
@@ -113,6 +122,10 @@ class MujocoManipulationEnv(gym.Env):
         self.task_instruction = "pick up the block"
         self._frame_id = 0
         self._episode_step = 0
+
+        # Used only by compute_scripted_reach_action below.
+        self._ee_site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
+        self._target_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target")
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -172,6 +185,48 @@ class MujocoManipulationEnv(gym.Env):
             "frame_id": self._frame_id,
         }
 
+    def render_overview(self) -> np.ndarray:
+        """Third-person RGB frame for the dashboard -- see the renderer's
+        setup comment in __init__ for why this is kept out of the real
+        Observation."""
+        self._overview_renderer.update_scene(self.data, camera=self._overview_camera_name)
+        return self._overview_renderer.render()
+
+    def compute_scripted_reach_action(self, gain: float = 8.0) -> np.ndarray:
+        """A hand-written baseline: nudges the arm's joint targets so the
+        end effector (`ee_site`) moves toward the target object.
+
+        This is a scripted controller, not a policy in any learned sense --
+        it uses privileged access to the simulator's ground truth (the
+        target's true position, and the site Jacobian via `mj_jacSite`) that
+        a real deployed policy would not have; a real one only ever sees
+        what's in Observation (camera images + joint state). It exists so
+        the dashboard can show visibly purposeful motion before a trained
+        policy exists, and to give a real one something concrete to beat
+        later. See the README's "In plain terms" section.
+
+        Implementation is Jacobian-transpose control: move each joint in the
+        direction that locally reduces the straight-line distance from the
+        end effector to the target, scaled by `gain`. It doesn't invert the
+        Jacobian (which would be exact but can blow up near singularities
+        like full arm extension), so it's stable everywhere at the cost of
+        being an approximate, gradual approach rather than a one-shot exact
+        solve -- adequate for driving the arm toward a visible target, not
+        precision placement.
+        """
+        ee_pos = self.data.site_xpos[self._ee_site_id]
+        target_pos = self.data.xpos[self._target_body_id]
+        error = target_pos - ee_pos
+
+        jacp = np.zeros((3, self.model.nv))
+        mujoco.mj_jacSite(self.model, self.data, jacp, None, self._ee_site_id)
+        jacp_arm = jacp[:, self._qvel_idx]  # (3, n_controllable_joints)
+
+        delta_q = gain * (jacp_arm.T @ error)
+        desired_q = self.data.qpos[self._qpos_idx] + delta_q
+        return np.clip(desired_q, self.action_space.low, self.action_space.high).astype(np.float32)
+
     def close(self) -> None:
         self._rgb_renderer.close()
         self._depth_renderer.close()
+        self._overview_renderer.close()

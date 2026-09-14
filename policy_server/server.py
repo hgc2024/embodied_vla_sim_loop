@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 import yaml
 
+from policy_server.observation_history import ObservationHistory
 from policy_server.ring_buffer import LatestObservationBuffer
 from policy_server.vla_wrapper import DummyPolicy, PolicyBackend
 from sim.zmq_publisher import ActionChunkPublisher, ObservationSubscriber, now_us
@@ -28,13 +29,29 @@ logger = logging.getLogger("policy_server")
 def build_policy(config: dict[str, Any]) -> PolicyBackend:
     policy_cfg = config["policy"]
     backend = policy_cfg.get("backend", "dummy")
-    if backend != "dummy":
-        raise NotImplementedError(
-            f"policy backend '{backend}' is not implemented yet; only 'dummy' is "
-            "available until LeRobot/OpenPI adapters land (see README milestones)"
+
+    if backend == "dummy":
+        return DummyPolicy(action_dim=policy_cfg["action_dim"], horizon=policy_cfg["action_horizon"])
+
+    if backend == "openpi":
+        # Imported lazily: openpi_policy.py itself raises a clear ImportError
+        # if openpi-client isn't installed, and importing it eagerly would
+        # make every other backend (dummy included) require that optional,
+        # separately-environed dependency just to start up.
+        from policy_server.adapters.openpi_policy import OpenPIPolicy
+
+        openpi_cfg = policy_cfg.get("openpi", {})
+        return OpenPIPolicy(
+            host=openpi_cfg["host"],
+            port=openpi_cfg["port"],
+            action_dim=policy_cfg["action_dim"],
+            horizon=policy_cfg["action_horizon"],
+            **{k: v for k, v in openpi_cfg.items() if k in ("image_key", "state_key", "prompt_key", "action_key")},
         )
-    return DummyPolicy(
-        action_dim=policy_cfg["action_dim"], horizon=policy_cfg["action_horizon"]
+
+    raise NotImplementedError(
+        f"policy backend '{backend}' is not implemented yet; 'dummy' and 'openpi' are "
+        "available (see README milestones for LeRobot)"
     )
 
 
@@ -55,6 +72,11 @@ class PolicyServer:
         )
         self.buffer = LatestObservationBuffer()
         self.policy = build_policy(config)
+        # Frames the transport actually delivered accumulate here so the
+        # policy can condition on more than just the single newest one --
+        # see observation_history.py's docstring for why this doesn't
+        # conflict with the transport's own "keep only the newest" discipline.
+        self.history = ObservationHistory(length=self.policy.obs_horizon)
 
         self._stop = threading.Event()
         self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
@@ -76,9 +98,12 @@ class PolicyServer:
                 if obs is None:
                     continue
                 last_seen_frame_id = obs["frame_id"]
+                self.history.push(obs)
+                if not self.history.is_ready():
+                    continue  # still filling the observation-history window
 
                 start = time.perf_counter()
-                actions = self.policy.predict(obs)
+                actions = self.policy.predict(self.history.stacked())
                 elapsed_ms = (time.perf_counter() - start) * 1_000
 
                 if not warmed_up:

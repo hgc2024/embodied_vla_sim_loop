@@ -1,10 +1,12 @@
-import type { StatusMessage } from "../types";
+import type { ActionMode, StatusMessage } from "../types";
 
 interface Props {
   status: StatusMessage | null;
 }
 
-const MODE_EXPLANATION: Record<StatusMessage["mode"], string> = {
+const MODE_EXPLANATION: Record<ActionMode, string> = {
+  scripted:
+    "The arm is following a hand-written \"reach toward the block\" controller -- not a trained AI yet, but genuinely goal-directed motion.",
   predicted: "The arm is following instructions from the policy.",
   fallback:
     "No fresh instruction arrived in time, so the arm is safely holding its last position.",

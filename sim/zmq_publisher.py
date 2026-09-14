@@ -160,6 +160,43 @@ class ObservationSubscriber(_ConflatingSubscriber):
         )
 
 
+def pack_overview_frame(frame_id: int, rgb: np.ndarray) -> bytes:
+    return frame_id.to_bytes(8, "little") + np.asarray(rgb, dtype=np.uint8).tobytes()
+
+
+def unpack_overview_frame(data: bytes, *, height: int, width: int) -> tuple[int, np.ndarray]:
+    frame_id = int.from_bytes(data[:8], "little")
+    rgb = np.frombuffer(data[8:], dtype=np.uint8).reshape(height, width, 3)
+    return frame_id, rgb
+
+
+class OverviewPublisher(_ConflatingPublisher):
+    """Sim-side: publishes the latest third-person view for the dashboard.
+
+    Deliberately separate from Observation/proto/schema.proto -- see
+    mujoco_env.py's render_overview() docstring. Raw RGB bytes, no protobuf,
+    since this has no research-relevance and is dashboard-only.
+    """
+
+    def send(self, frame_id: int, rgb: np.ndarray) -> None:
+        self._send(pack_overview_frame(frame_id, rgb))
+
+
+class OverviewSubscriber(_ConflatingSubscriber):
+    """Dashboard-side: receives the latest third-person view."""
+
+    def __init__(self, endpoint: str, *, height: int, width: int, high_water_mark: int = 2) -> None:
+        super().__init__(endpoint, high_water_mark)
+        self._height = height
+        self._width = width
+
+    def recv(self, timeout_ms: int = 0) -> tuple[int, np.ndarray] | None:
+        data = self._recv(timeout_ms)
+        if data is None:
+            return None
+        return unpack_overview_frame(data, height=self._height, width=self._width)
+
+
 class ActionChunkPublisher(_ConflatingPublisher):
     """Policy-side: publishes the latest predicted ActionChunk."""
 

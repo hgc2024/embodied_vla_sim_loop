@@ -5,3 +5,7 @@ generated/
 __pycache__/
 *.pyc
 .pytest_cache/
+# Third-party reference codebases (diffusion_policy, openpi) kept locally for
+# analysis only -- never committed, and never copied from wholesale into this
+# project's own source. See README's "License and external assets" section.
+.reference/

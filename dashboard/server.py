@@ -33,7 +33,7 @@ from pydantic import BaseModel
 # sys.path when this file isn't reached through the installed package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sim.zmq_publisher import CommandPublisher, unpack_observation  # noqa: E402
+from sim.zmq_publisher import CommandPublisher, unpack_observation, unpack_overview_frame  # noqa: E402
 
 logger = logging.getLogger("dashboard")
 
@@ -132,6 +132,29 @@ async def _relay_status(config: dict[str, Any]) -> None:
         await manager.broadcast(status)
 
 
+async def _relay_overview(config: dict[str, Any]) -> None:
+    """Third-person view -- see mujoco_env.py's render_overview() docstring
+    for why this is a separate channel from Observation."""
+    ctx = zmq.asyncio.Context()
+    socket = ctx.socket(zmq.SUB)
+    socket.setsockopt(zmq.RCVHWM, 2)
+    socket.setsockopt(zmq.CONFLATE, 1)
+    socket.setsockopt(zmq.SUBSCRIBE, b"")
+    socket.connect(config["ipc"]["overview"])
+
+    cam_cfg = config["camera"]
+    height, width = cam_cfg["height"], cam_cfg["width"]
+
+    logger.info("relaying overview from %s", config["ipc"]["overview"])
+    while True:
+        data = await socket.recv()
+        frame_id, rgb = unpack_overview_frame(data, height=height, width=width)
+        rgb_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        await manager.broadcast(
+            {"type": "overview", "frame_id": frame_id, "overview_jpeg": _encode_jpeg(rgb_bgr)}
+        )
+
+
 _command_pub: CommandPublisher | None = None
 
 
@@ -141,20 +164,29 @@ async def lifespan(app: FastAPI):
     config = yaml.safe_load(CONFIG_PATH.read_text())
     _command_pub = CommandPublisher(config["ipc"]["commands"])
 
-    obs_task = asyncio.create_task(_relay_observations(config))
-    status_task = asyncio.create_task(_relay_status(config))
+    tasks = [
+        asyncio.create_task(_relay_observations(config)),
+        asyncio.create_task(_relay_status(config)),
+        asyncio.create_task(_relay_overview(config)),
+    ]
     try:
         yield
     finally:
-        obs_task.cancel()
-        status_task.cancel()
+        for task in tasks:
+            task.cancel()
         _command_pub.close()
 
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    # Wide open on purpose: this is a local dev tool with no auth already
+    # (see README's IPC note), and a fixed allowlist of a couple of origins
+    # breaks the moment the dashboard is viewed through anything that
+    # rewrites the origin -- an IDE's port-forwarding/webview proxy, a
+    # different LAN hostname, etc. There's nothing here worth protecting
+    # with an origin check.
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

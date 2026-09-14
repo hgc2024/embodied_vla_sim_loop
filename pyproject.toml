@@ -32,10 +32,20 @@ dashboard = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.30",
 ]
+# openpi-client pins numpy<2.0.0, which conflicts with the numpy 2.x this
+# project's torch/mujoco need -- installing this extra into the SAME venv as
+# `mujoco` will downgrade numpy and can break both. Install it into its own,
+# separate environment (matching how the README already treats a from-source
+# LeRobot/OpenPI checkout) and run policy_server from there when using the
+# openpi backend. See policy_server/adapters/openpi_policy.py. typing_extensions
+# is pinned explicitly because openpi-client 0.1.2 imports it without
+# declaring it as a dependency -- a real gap in their package metadata found
+# while verifying this adapter, not an assumption.
+openpi = ["openpi-client>=0.1.2", "typing_extensions>=4"]
 dev = [
   "pytest>=8",
   "pytest-timeout>=2.3",
 ]
 
 [tool.setuptools]
-packages = ["sim", "policy_server", "dashboard"]
+packages = ["sim", "policy_server", "policy_server.adapters", "dashboard"]

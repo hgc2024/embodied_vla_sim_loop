@@ -37,6 +37,7 @@ from sim.zmq_publisher import (
     ActionChunkSubscriber,
     CommandSubscriber,
     ObservationPublisher,
+    OverviewPublisher,
     StatusPublisher,
     now_us,
 )
@@ -46,6 +47,7 @@ logger = logging.getLogger("run_sim")
 BLEND_STEPS = 4  # control steps to ramp into a newly arrived chunk
 MAX_ACTION_AGE_US = 500_000  # 0.5s: older than this without a new chunk -> fallback
 STATUS_PERIOD_S = 0.2  # snappier than the 1s text log, cheap since it's tiny JSON
+OVERVIEW_EVERY_N_STEPS = 4  # ~15Hz at control_hz=60 -- plenty smooth for a human, cheaper to render
 
 
 class ActionChunkPlayer:
@@ -110,7 +112,7 @@ def _status(
     *,
     control_hz: float,
     frame_id: int,
-    is_fallback: bool,
+    mode: str,
     paused: bool,
 ) -> dict[str, Any]:
     return {
@@ -118,7 +120,7 @@ def _status(
         "control_hz": control_hz,
         "frame_id": frame_id,
         "action_age_ms": player.action_age_ms,
-        "mode": "fallback" if is_fallback else "predicted",
+        "mode": mode,
         "fallback_steps": player.fallback_steps,
         "paused": paused,
         "domain_randomization_enabled": env.domain_randomization_enabled,
@@ -136,7 +138,15 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
     )
     command_sub = CommandSubscriber(ipc_cfg["commands"])
     status_pub = StatusPublisher(ipc_cfg["status"])
+    overview_pub = OverviewPublisher(ipc_cfg["overview"])
     player = ActionChunkPlayer(action_dim=env.action_space.shape[0])
+
+    # scripted_reach bypasses the policy server entirely -- see
+    # mujoco_env.py's compute_scripted_reach_action docstring for why it
+    # needs privileged sim access a real policy process wouldn't have.
+    # `player`/`action_sub` are still created above so status reporting has
+    # sensible values (action_age_ms=None, fallback_steps=0) either way.
+    scripted_reach = config["policy"].get("backend", "dummy") == "scripted_reach"
 
     control_period = 1.0 / config["control_hz"]
     obs, _ = env.reset()
@@ -144,7 +154,7 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
 
     paused = False
     step_once = False
-    is_fallback = True
+    mode = "scripted" if scripted_reach else "fallback"
     achieved_hz = 0.0
     resuming = False  # true for the first step after a pause, to reset the Hz window
 
@@ -181,7 +191,7 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
                             player,
                             control_hz=0.0,
                             frame_id=obs["frame_id"],
-                            is_fallback=is_fallback,
+                            mode=mode,
                             paused=True,
                         )
                     )
@@ -201,14 +211,20 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
                 steps_since_log = 0
                 resuming = False
 
-            player.offer(action_sub.recv(timeout_ms=0))
-            action, is_fallback = player.next_action()
+            if scripted_reach:
+                action = env.compute_scripted_reach_action()
+            else:
+                player.offer(action_sub.recv(timeout_ms=0))
+                action, is_fallback = player.next_action()
+                mode = "fallback" if is_fallback else "predicted"
 
             obs, _reward, terminated, truncated, _info = env.step(action)
             obs_pub.send(obs)
 
             step += 1
             steps_since_log += 1
+            if step % OVERVIEW_EVERY_N_STEPS == 0:
+                overview_pub.send(obs["frame_id"], env.render_overview())
             if terminated or truncated:
                 obs, _ = env.reset()
                 obs_pub.send(obs)
@@ -221,7 +237,7 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
                     achieved_hz,
                     obs["frame_id"],
                     player.action_age_ms,
-                    "fallback" if is_fallback else "predicted",
+                    mode,
                     player.fallback_steps,
                 )
                 last_log, steps_since_log = now, 0
@@ -233,7 +249,7 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
                         player,
                         control_hz=achieved_hz,
                         frame_id=obs["frame_id"],
-                        is_fallback=is_fallback,
+                        mode=mode,
                         paused=False,
                     )
                 )
@@ -249,6 +265,7 @@ def run(config: dict[str, Any], max_steps: int | None = None) -> None:
         action_sub.close()
         command_sub.close()
         status_pub.close()
+        overview_pub.close()
         env.close()
 
 
